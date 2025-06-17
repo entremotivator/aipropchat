@@ -3,187 +3,347 @@ import openai
 from openai import OpenAI
 from datetime import datetime
 import requests
+import pandas as pd
+import json
 
 # ------------------ Streamlit Config ------------------
-st.set_page_config(page_title="AI Prop Chat", layout="wide")
+st.set_page_config(
+    page_title="AI Prop Chat", 
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-# ------------------ Session State for Auth ------------------
+# ------------------ Custom CSS ------------------
+st.markdown("""
+<style>
+    .main-header {
+        text-align: center;
+        background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+        padding: 2rem;
+        border-radius: 10px;
+        margin-bottom: 2rem;
+        color: white;
+    }
+    .feature-card {
+        background: #f8f9fa;
+        padding: 1.5rem;
+        border-radius: 8px;
+        border-left: 4px solid #667eea;
+        margin: 1rem 0;
+    }
+    .metric-card {
+        background: white;
+        padding: 1rem;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        text-align: center;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# ------------------ Session State Initialization ------------------
 if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
+if "property_data" not in st.session_state:
+    st.session_state.property_data = None
 
-# ------------------ Login Screen ------------------
-def login_screen():
-    st.markdown("""
-        <div style='text-align: center;'>
-            <h1>🔐 Login to AI Prop Chat</h1>
-        </div>
-    """, unsafe_allow_html=True)
-    with st.form("login_form"):
-        username = st.text_input("Username")
-        password = st.text_input("Password", type="password")
-        login_button = st.form_submit_button("Login")
-        if login_button:
-            if username == "admin" and password == "password":  # Replace with real auth logic
-                st.session_state.authenticated = True
-                st.success("Login successful")
-            else:
-                st.error("Invalid credentials")
-
-# ------------------ App Layout ------------------
-if not st.session_state.authenticated:
-    login_screen()
-else:
-    # ------------------ Sidebar Settings ------------------
-    st.sidebar.title("🔐 OpenAI Settings")
-    api_key = st.sidebar.text_input("Enter your OpenAI API Key", type="password")
-    rentcast_api_key = st.sidebar.text_input("Enter RentCast API Key", type="password")
-    st.sidebar.markdown("---")
-    st.sidebar.markdown("ℹ️ Your keys are used only in your session and not stored.")
-
-    # ------------------ Navigation ------------------
-    pages = [
-        "🏠 Home", "📊 Comparison", "🚀 Features", "❤️ Testimonials", "💸 Pricing",
-        "🤖 AI Chat", "🏠 Property Records", "📬 Contact"
-    ]
-    page = st.sidebar.radio("Navigate", pages)
-
-    # ------------------ Page: Home ------------------
-    if page == "🏠 Home":
-        st.markdown("""
-            <div style='text-align: center; padding: 20px;'>
-                <h1>🏡 AI Prop Chat</h1>
-                <p style='font-size: 18px;'>Revolutionizing Real Estate. Smarter than PropStream. Built for modern investors, wholesalers, and agents.</p>
-            </div>
-        """, unsafe_allow_html=True)
-        st.markdown("---")
-        st.subheader("📘 About AI Prop Chat")
-        st.write("""
-            **AI Prop Chat** is an intelligent real estate data platform designed to simplify deal sourcing,
-            automate property research, and optimize investment decisions with the power of artificial intelligence.
-
-            Why limit yourself with old-school tools like PropStream? Our advanced chat-based interface gives you
-            access to real-time insights, owner contact info, lead scoring, and predictive analysis — all in one place.
-        """)
-
-    # ------------------ Page: Comparison ------------------
-    elif page == "📊 Comparison":
-        st.subheader("📊 AI Prop Chat vs PropStream")
-        comparison = {
-            "Feature": [
-                "AI Chat Assistant", "Real-Time Property Data", "Owner Contact Lookup",
-                "Lead Scoring", "Comps & Heatmaps", "Smart Deal Analyzer",
-                "CRM Export", "Mobile-Friendly", "AI Assistant Available 24/7"
-            ],
-            "AI Prop Chat ✅": [
-                "Yes", "Yes", "Yes",
-                "Predictive AI", "Interactive + Visual", "ARV + Repair Estimator",
-                "Direct Integration", "Yes", "Yes"
-            ],
-            "PropStream ❌": [
-                "No", "Delayed", "Limited",
-                "Manual", "Basic Filters", "Basic ROI Calculator",
-                "CSV Export", "Limited", "No"
-            ]
-        }
-        st.table(comparison)
-
-    # ------------------ Page: Features ------------------
-    elif page == "🚀 Features":
-        st.markdown("## 🚀 Core Features")
-        feature_cols = st.columns(3)
-        features = [
-            ("🤖 AI Chat with Properties", "Get instant insights by chatting with any address."),
-            ("📊 Smart Deal Analyzer", "Calculate ROI, ARV, and rehab instantly."),
-            ("📞 Owner Contact Lookup", "Connect directly with motivated sellers."),
-            ("📍 Visual Heatmaps & Comps", "See sales trends, price per sqft, and neighborhood dynamics."),
-            ("⚡ Predictive Lead Scoring", "Prioritized leads that are more likely to convert."),
-            ("🔁 CRM + Workflow Integration", "Push leads to your CRM in real-time."),
-            ("📅 Task & Follow-Up Automation", "Schedule calls, texts, and emails from inside the app."),
-            ("📱 Mobile App Ready", "Use anywhere. Mobile-friendly interface."),
-            ("📂 Export & Custom Reports", "Build and share branded property reports.")
-        ]
-        for i, (title, desc) in enumerate(features):
-            with feature_cols[i % 3]:
-                st.markdown(f"### {title}")
-                st.markdown(f"<div style='min-height: 80px;'>{desc}</div>", unsafe_allow_html=True)
-
-    # ------------------ Page: Property Records ------------------
-    elif page == "🏠 Property Records":
-        st.markdown("## 🏠 Property Records Lookup")
-        address_input = st.text_input("Enter a full property address")
-
-        if st.button("Get Property Data") and rentcast_api_key and address_input:
-            with st.spinner("Fetching property details..."):
-                try:
-                    response = requests.get(
-                        "https://api.rentcast.io/v1/properties",
-                        params={"address": address_input},
-                        headers={"X-Api-Key": rentcast_api_key}
-                    )
-                    if response.status_code == 200:
-                        prop = response.json()
-                        st.json(prop)
+# ------------------ Authentication ------------------
+def authenticate():
+    with st.sidebar.expander("🔐 Login", expanded=not st.session_state.authenticated):
+        if not st.session_state.authenticated:
+            with st.form("login_form"):
+                username = st.text_input("Username")
+                password = st.text_input("Password", type="password")
+                login_button = st.form_submit_button("Login")
+                if login_button:
+                    if username == "admin" and password == "password":  # Replace with real auth
+                        st.session_state.authenticated = True
+                        st.success("✅ Login successful!")
+                        st.rerun()
                     else:
-                        st.error(f"Failed to retrieve property. Status: {response.status_code}")
-                except Exception as e:
-                    st.error(f"❌ Error: {e}")
+                        st.error("❌ Invalid credentials")
+        else:
+            st.success("✅ Logged in as admin")
+            if st.button("Logout"):
+                st.session_state.authenticated = False
+                st.rerun()
 
-    # ------------------ Page: AI Chat ------------------
-    elif page == "🤖 AI Chat":
-        st.markdown("## 🤖 Ask AI Prop Chat")
-        if "chat_history" not in st.session_state:
-            st.session_state.chat_history = []
+# ------------------ API Configuration ------------------
+def setup_apis():
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("🔑 API Configuration")
+    
+    api_key = st.sidebar.text_input(
+        "OpenAI API Key", 
+        type="password",
+        help="Required for AI chat functionality"
+    )
+    
+    rentcast_key = st.sidebar.text_input(
+        "RentCast API Key", 
+        type="password",
+        help="Required for property data lookup"
+    )
+    
+    st.sidebar.markdown("ℹ️ *Keys are secure and not stored*")
+    return api_key, rentcast_key
 
-        user_prompt = st.chat_input("Ask about a property (e.g., 'What’s the ARV of 123 Main St in Atlanta?')")
+# ------------------ Property Lookup Function ------------------
+def fetch_property_data(address, api_key):
+    """Fetch property data from RentCast API"""
+    try:
+        response = requests.get(
+            "https://api.rentcast.io/v1/properties",
+            params={"address": address},
+            headers={"X-Api-Key": api_key},
+            timeout=10
+        )
+        if response.status_code == 200:
+            return response.json(), None
+        else:
+            return None, f"API Error: {response.status_code}"
+    except Exception as e:
+        return None, f"Request failed: {str(e)}"
 
-        def ask_openai_chat(prompt, key):
-            try:
-                client = OpenAI(api_key=key)
-                system_msg = """
-                You are a real estate investment expert named AI Prop Chat.
-                Help users analyze deals, estimate ARV, calculate ROI, provide local comps,
-                and explain real estate terms in simple language.
-                """
-                response = client.chat.completions.create(
-                    model="gpt-4",
-                    messages=[
-                        {"role": "system", "content": system_msg},
-                        {"role": "user", "content": prompt}
-                    ],
-                    temperature=0.5,
-                    max_tokens=500
-                )
-                return response.choices[0].message.content.strip()
-            except Exception as e:
-                return f"❌ Error: {str(e)}"
+# ------------------ AI Chat Function ------------------
+def get_ai_response(prompt, api_key, property_context=None):
+    """Get response from OpenAI"""
+    try:
+        client = OpenAI(api_key=api_key)
+        
+        system_message = """You are AI Prop Chat, an expert real estate investment assistant. 
+        Help users analyze properties, calculate ROI, estimate ARV, provide market insights, 
+        and explain real estate concepts clearly. Be concise but thorough."""
+        
+        if property_context:
+            system_message += f"\n\nCurrent property context: {json.dumps(property_context, indent=2)}"
+        
+        response = client.chat.completions.create(
+            model="gpt-4",
+            messages=[
+                {"role": "system", "content": system_message},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.7,
+            max_tokens=800
+        )
+        return response.choices[0].message.content.strip()
+    except Exception as e:
+        return f"❌ AI Error: {str(e)}"
 
-        if user_prompt and api_key:
-            with st.spinner("Analyzing property..."):
-                response = ask_openai_chat(user_prompt, api_key)
-                st.session_state.chat_history.append(("user", user_prompt))
-                st.session_state.chat_history.append(("ai", response))
-
-        for role, msg in st.session_state.chat_history:
-            with st.chat_message("user" if role == "user" else "assistant"):
-                st.markdown(msg)
-
-    # ------------------ Page: Contact ------------------
-    elif page == "📬 Contact":
-        st.markdown("## 📬 Get Started or Request a Demo")
-        with st.form("lead_form"):
-            name = st.text_input("Full Name")
-            email = st.text_input("Email")
-            phone = st.text_input("Phone Number")
-            message = st.text_area("What are you looking for?")
-            submitted = st.form_submit_button("Submit")
-            if submitted:
-                st.success(f"Thanks {name}, we'll be in touch soon!")
-
-    # ------------------ Footer ------------------
+# ------------------ Main App ------------------
+def main():
+    # Header
     st.markdown("""
-        <hr style="margin-top: 50px;"/>
-        <div style="text-align: center; color: gray;">
-            <p>© {year} AI Prop Chat. All rights reserved.</p>
-            <p><a href="https://vipbusinesscredit.com" target="_blank">Visit Website</a> | <a href="mailto:support@aipropchat.com">Contact Support</a></p>
-        </div>
-    """.format(year=datetime.now().year), unsafe_allow_html=True)
+    <div class="main-header">
+        <h1>🏡 AI Prop Chat</h1>
+        <p>Intelligent Real Estate Analysis Platform</p>
+        <p><em>Your AI-powered property investment assistant</em></p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Authentication
+    authenticate()
+    
+    if not st.session_state.authenticated:
+        st.warning("🔐 Please login to access the full platform")
+        return
+    
+    # API Setup
+    openai_key, rentcast_key = setup_apis()
+    
+    # Main Content Layout
+    col1, col2 = st.columns([1, 1])
+    
+    with col1:
+        st.subheader("🏠 Property Lookup & Analysis")
+        
+        # Property Address Input
+        address = st.text_input(
+            "Enter Property Address",
+            placeholder="123 Main St, Atlanta, GA 30309",
+            help="Enter full address for best results"
+        )
+        
+        # Lookup Button
+        if st.button("🔍 Analyze Property", type="primary") and address and rentcast_key:
+            with st.spinner("Fetching property data..."):
+                prop_data, error = fetch_property_data(address, rentcast_key)
+                
+                if prop_data:
+                    st.session_state.property_data = prop_data
+                    st.success("✅ Property data retrieved!")
+                else:
+                    st.error(f"❌ {error}")
+        
+        # Display Property Data
+        if st.session_state.property_data:
+            st.markdown("### 📊 Property Details")
+            
+            data = st.session_state.property_data
+            
+            # Key metrics in columns
+            if isinstance(data, list) and len(data) > 0:
+                prop = data[0]
+            else:
+                prop = data
+            
+            metric_col1, metric_col2, metric_col3 = st.columns(3)
+            
+            with metric_col1:
+                st.metric(
+                    "Estimated Value",
+                    f"${prop.get('propertyValue', 'N/A'):,}" if isinstance(prop.get('propertyValue'), (int, float)) else "N/A"
+                )
+            
+            with metric_col2:
+                st.metric(
+                    "Bedrooms",
+                    prop.get('bedrooms', 'N/A')
+                )
+            
+            with metric_col3:
+                st.metric(
+                    "Bathrooms",
+                    prop.get('bathrooms', 'N/A')
+                )
+            
+            # Detailed information
+            with st.expander("📋 Detailed Property Information"):
+                st.json(prop)
+            
+            # Export option
+            if st.button("📥 Export Property Data"):
+                df = pd.json_normalize([prop])
+                csv = df.to_csv(index=False)
+                st.download_button(
+                    "Download CSV",
+                    csv,
+                    f"property_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                    "text/csv"
+                )
+    
+    with col2:
+        st.subheader("🤖 AI Property Assistant")
+        
+        # Chat Interface
+        chat_container = st.container()
+        
+        with chat_container:
+            # Display chat history
+            for role, message in st.session_state.chat_history[-6:]:  # Show last 6 messages
+                with st.chat_message("user" if role == "user" else "assistant"):
+                    st.markdown(message)
+        
+        # Chat input
+        user_input = st.chat_input("Ask about properties, investments, or real estate strategies...")
+        
+        if user_input and openai_key:
+            # Add user message to history
+            st.session_state.chat_history.append(("user", user_input))
+            
+            # Get AI response
+            with st.spinner("AI is thinking..."):
+                ai_response = get_ai_response(
+                    user_input, 
+                    openai_key, 
+                    st.session_state.property_data
+                )
+                st.session_state.chat_history.append(("ai", ai_response))
+            
+            st.rerun()
+        
+        # Quick action buttons
+        st.markdown("### ⚡ Quick Actions")
+        
+        quick_col1, quick_col2 = st.columns(2)
+        
+        with quick_col1:
+            if st.button("💰 Calculate ROI") and openai_key:
+                if st.session_state.property_data:
+                    prompt = "Calculate potential ROI for this property assuming different investment strategies (fix & flip, rental, wholesale)"
+                    response = get_ai_response(prompt, openai_key, st.session_state.property_data)
+                    st.session_state.chat_history.append(("user", "Calculate ROI"))
+                    st.session_state.chat_history.append(("ai", response))
+                    st.rerun()
+                else:
+                    st.warning("Please lookup a property first")
+        
+        with quick_col2:
+            if st.button("🏘️ Market Analysis") and openai_key:
+                if address:
+                    prompt = f"Provide market analysis for properties in the area of {address}"
+                    response = get_ai_response(prompt, openai_key)
+                    st.session_state.chat_history.append(("user", "Market Analysis"))
+                    st.session_state.chat_history.append(("ai", response))
+                    st.rerun()
+                else:
+                    st.warning("Please enter an address first")
+        
+        # Clear chat
+        if st.button("🗑️ Clear Chat"):
+            st.session_state.chat_history = []
+            st.rerun()
+    
+    # Bulk Upload Section
+    st.markdown("---")
+    st.subheader("📤 Bulk Property Analysis")
+    
+    uploaded_file = st.file_uploader(
+        "Upload CSV with property addresses",
+        type=["csv"],
+        help="CSV should have addresses in the first column"
+    )
+    
+    if uploaded_file and rentcast_key:
+        df = pd.read_csv(uploaded_file)
+        st.write("📋 Uploaded Properties:", df.head())
+        
+        if st.button("🚀 Analyze All Properties"):
+            progress_bar = st.progress(0)
+            results = []
+            
+            for idx, row in df.iterrows():
+                address = str(row.iloc[0])  # First column
+                prop_data, error = fetch_property_data(address, rentcast_key)
+                
+                if prop_data:
+                    if isinstance(prop_data, list) and len(prop_data) > 0:
+                        results.append(prop_data[0])
+                    else:
+                        results.append(prop_data)
+                
+                progress_bar.progress((idx + 1) / len(df))
+            
+            if results:
+                st.success(f"✅ Analyzed {len(results)} properties")
+                results_df = pd.json_normalize(results)
+                st.dataframe(results_df)
+                
+                csv_data = results_df.to_csv(index=False)
+                st.download_button(
+                    "📥 Download Results",
+                    csv_data,
+                    f"bulk_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                    "text/csv"
+                )
+
+# ------------------ Footer ------------------
+def footer():
+    st.markdown("---")
+    st.markdown(f"""
+    <div style="text-align: center; color: #666; padding: 20px;">
+        <p>© {datetime.now().year} AI Prop Chat - Powered by AI for Real Estate Professionals</p>
+        <p>
+            <a href="https://vipbusinesscredit.com" target="_blank">🌐 Website</a> | 
+            <a href="mailto:support@aipropchat.com">📧 Support</a>
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+
+# ------------------ Run App ------------------
+if __name__ == "__main__":
+    main()
+    footer()
